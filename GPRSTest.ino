@@ -42,7 +42,7 @@ char *STR_OK            = "OK";
 #if defined(DEBUG)
   #define LASER_ADJUST_LOCK_TIME 2000
 #else
-  #define LASER_ADJUST_LOCK_TIME 15000
+  #define LASER_ADJUST_LOCK_TIME 10000
 #endif
 #define SMS_RESPONSE_TIMEOUT     30000
 byte laserState = LASER_STATE_INACTIVE;
@@ -139,6 +139,7 @@ void doTrimUnits(void)
 {
   boolean timeReached;
   uint32_t timer;
+  uint32_t beepTimer;
   boolean beepon = false;
   
   hostSerial.println(F("Make your adjustments ladies."));
@@ -149,13 +150,14 @@ void doTrimUnits(void)
     while (digitalRead(LASER_SENSOR_PIN));
     
     timer = millis() + LASER_ADJUST_LOCK_TIME;
+    beepTimer = millis();
     digitalWrite(ADJUSTMENT_LED, LOW);
     
     while (millis() < timer) {
       if (digitalRead(LASER_SENSOR_PIN))
         break;
       // Make some noice
-      if (!(millis() % 100)) {
+      if (millis() >= beepTimer) {
         if (beepon) {
           beepOff();
           beepon = false;
@@ -163,13 +165,15 @@ void doTrimUnits(void)
           beepOn(50, 0);
           beepon = true;
         }
+        beepTimer = millis() + 200;
       }
+      delay(2);
     }
+  // Make sure sound is off
+    beepOff();
     delay(1);
   } while (millis() < timer);
 
-  // Make sure sound is off
-  beepOff();
   // Shut of LED to save power
   digitalWrite(ADJUSTMENT_LED, HIGH);
   hostSerial.println(F("Adjustment is now fixed, starting main function."));
@@ -354,10 +358,17 @@ int sendSms(void)
   gprsSerial.print(F("AT+CSCS=\"8859-1\"\r"));
   if (!gprsWaitForOK()) goto error;
   // Select between the two available number
-  if (!digitalRead(SMS_NUMBER_PIN))
+  if (!digitalRead(SMS_NUMBER_PIN)) {
     gprsSerial.println(F(SMS_STRING1));
-  else
+#if defined(DEBUG)
+    hostSerial.println(F(SMS_STRING1));
+#endif
+  } else {
     gprsSerial.println(F(SMS_STRING2));
+#if defined(DEBUG)
+    hostSerial.println(F(SMS_STRING2));
+#endif
+  }
   delay(100);
   gprsSerial.println(F(STR_MESSAGE)); //the content of the message
   delay(100);
@@ -393,7 +404,14 @@ error:
   return 1;
 #else
   hostSerial.println("Emulating Sending Text...");
-  delay(4000);
+  // Select between the two available number
+  hostSerial.print(F("Sending to SMS number: "));
+  if (!digitalRead(SMS_NUMBER_PIN)) {
+    hostSerial.println(F(SMS_STRING1));
+  } else {
+    hostSerial.println(F(SMS_STRING2));
+  }
+  delay(1000);
   return 0;
 #endif
 }
