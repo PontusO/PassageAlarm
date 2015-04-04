@@ -13,6 +13,7 @@
 #define GPRS_STATUS_PIN   6    // Status pin from the GPRS module
 #define LASER_SENSOR_PIN  5    // Connected to the laser module
 #define SMS_NUMBER_PIN    4    // Used to choose between to SMS numbers
+#define BEEP_PIN          3    // PWM based beeper pin
 #define ADJUSTMENT_LED    10   // External indicator LED.
 #define BLUE_LED          13   // Internal LED, kept off at all times
 
@@ -64,6 +65,7 @@ void setup()
   pinMode(BLUE_LED, OUTPUT);
   pinMode(ADJUSTMENT_LED, OUTPUT);
   pinMode(SMS_NUMBER_PIN, INPUT_PULLUP);
+  pinMode(BEEP_PIN, OUTPUT);
   
   oldLaserPin = digitalRead(LASER_SENSOR_PIN);
   laserBlockTimer = millis();
@@ -103,6 +105,30 @@ void setup()
 
 /***************************************************************************
  *
+ * Turns on the beeper and returns if the duration is equal to zero.
+ * If duration is set it will wait for the specified time and then return.
+ *
+ **************************************************************************/
+void beepOn(uint8_t freq, uint8_t duration)
+{
+  analogWrite(BEEP_PIN, freq);
+  if (duration) {
+    delay(duration);
+  }
+}
+
+/***************************************************************************
+ *
+ * Turns beeper off and return.
+ *
+ **************************************************************************/
+void beepOff(void)
+{
+  analogWrite(BEEP_PIN, 0);
+}
+
+/***************************************************************************
+ *
  * This function will wait for the units to lock for more than 15 seconds
  * before continuing to execute the main function.
  * This allows the user to adjust the position of the transitter and the
@@ -113,6 +139,7 @@ void doTrimUnits(void)
 {
   boolean timeReached;
   uint32_t timer;
+  boolean beepon = false;
   
   hostSerial.println(F("Make your adjustments ladies."));
   
@@ -127,10 +154,22 @@ void doTrimUnits(void)
     while (millis() < timer) {
       if (digitalRead(LASER_SENSOR_PIN))
         break;
+      // Make some noice
+      if (!(millis() % 100)) {
+        if (beepon) {
+          beepOff();
+          beepon = false;
+        } else {
+          beepOn(50, 0);
+          beepon = true;
+        }
+      }
     }
     delay(1);
   } while (millis() < timer);
 
+  // Make sure sound is off
+  beepOff();
   // Shut of LED to save power
   digitalWrite(ADJUSTMENT_LED, HIGH);
   hostSerial.println(F("Adjustment is now fixed, starting main function."));
