@@ -9,14 +9,14 @@
 #define hostSerial      Serial
 #define gprsSerial      Serial1
 
-#define GPRS_POWER_PIN    9
-#define GPRS_STATUS_PIN   6
-#define LASER_SENSOR_PIN  5
-#define ADJUSTMENT_LED    10
-#define BLUE_LED          13
+#define GPRS_POWER_PIN    9    // Enables or disables power to the GPRS module
+#define GPRS_STATUS_PIN   6    // Status pin from the GPRS module
+#define LASER_SENSOR_PIN  5    // Connected to the laser module
+#define SMS_NUMBER_PIN    4    // Used to choose between to SMS numbers
+#define ADJUSTMENT_LED    10   // External indicator LED.
+#define BLUE_LED          13   // Internal LED, kept off at all times
 
 char buffer[64]; // buffer array for data recieve over serial port
-int count=0;     // counter for buffer array 
 
 boolean linkEstablished = false;
 boolean messageInhibit = false;
@@ -25,8 +25,8 @@ char *STR_CALL_READY    = "Call Ready";
 char *STR_OK            = "OK";
 #define   STR_MESSAGE   "Ett mess fr\xe5n I V\xe5tt och Torrts entreklocka !" \
                         "N\xe5gon \xe4r h\xe4r, Skynda skynda =)"
-//#define   SMS_STRING    "AT+CMGS = \"+46768582241\""    /* Carina */
-#define   SMS_STRING    "AT+CMGS = \"+46768582240\""    /* Pontus */
+#define   SMS_STRING1   "AT+CMGS = \"+46768582241\""    /* Carina */
+#define   SMS_STRING2   "AT+CMGS = \"+46768582240\""    /* Pontus */
 
 // Laser beam variables and state definitions
 #define LASER_STATE_INACTIVE     0
@@ -60,9 +60,10 @@ void setup()
   // Set fixed pin modes
   pinMode(GPRS_POWER_PIN, OUTPUT);
   pinMode(GPRS_STATUS_PIN, INPUT);
-  pinMode(LASER_SENSOR_PIN, INPUT);
+  pinMode(LASER_SENSOR_PIN, INPUT);  // Has strong (4.7K) external pull up
   pinMode(BLUE_LED, OUTPUT);
   pinMode(ADJUSTMENT_LED, OUTPUT);
+  pinMode(SMS_NUMBER_PIN, INPUT_PULLUP);
   
   oldLaserPin = digitalRead(LASER_SENSOR_PIN);
   laserBlockTimer = millis();
@@ -313,7 +314,11 @@ int sendSms(void)
   if (!gprsWaitForOK()) goto error;
   gprsSerial.print(F("AT+CSCS=\"8859-1\"\r"));
   if (!gprsWaitForOK()) goto error;
-  gprsSerial.println(F(SMS_STRING));
+  // Select between the two available number
+  if (!digitalRead(SMS_NUMBER_PIN))
+    gprsSerial.println(F(SMS_STRING1));
+  else
+    gprsSerial.println(F(SMS_STRING2));
   delay(100);
   gprsSerial.println(F(STR_MESSAGE)); //the content of the message
   delay(100);
