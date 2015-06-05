@@ -26,6 +26,8 @@ char *STR_CALL_READY    = "Call Ready";
 char *STR_OK            = "OK";
 #define   STR_MESSAGE   "Ett mess fr\xe5n I V\xe5tt och Torrts entreklocka !" \
                         "N\xe5gon \xe4r h\xe4r, Skynda skynda =)"
+#define   STR_WARNING   "Lasersignalen \xe4 borta, v\xe4nligen kontrollera systemet !"
+#define   STR_WELCOME   "Nu har passersystemet startat !"
 #define   SMS_STRING1   "AT+CMGS = \"+46768582241\""    /* Carina */
 #define   SMS_STRING2   "AT+CMGS = \"+46768582240\""    /* Pontus */
 
@@ -38,18 +40,20 @@ char *STR_OK            = "OK";
 #define LASER_STATE_GUARD_STOP   5
 
 #define LASER_DETECTION_GUARD    5000
-#define LASER_MIN_HIGH_STATE     50
+#define LASER_BLOCKED_TIMEOUT    120000
+#define LASER_MIN_HIGH_STATE     35
 #if defined(DEBUG)
   #define LASER_ADJUST_LOCK_TIME 2000
 #else
   #define LASER_ADJUST_LOCK_TIME 10000
 #endif
-#define SMS_RESPONSE_TIMEOUT     30000
+#define SMS_RESPONSE_TIMEOUT     60000
 byte laserState = LASER_STATE_INACTIVE;
 byte oldLaserPin;
 boolean laserBlockTimerEnabled = false;
 uint32_t laserBlockTimer;
 uint32_t laserTrigTimer;
+uint32_t laserPresentTimer;
 
 /***************************************************************************
  *
@@ -61,7 +65,7 @@ void setup()
   // Set fixed pin modes
   pinMode(GPRS_POWER_PIN, OUTPUT);
   pinMode(GPRS_STATUS_PIN, INPUT);
-  pinMode(LASER_SENSOR_PIN, INPUT);  // Has strong (4.7K) external pull up
+  pinMode(LASER_SENSOR_PIN, INPUT_PULLUP);  // Has strong (4.7K) external pull up
   pinMode(BLUE_LED, OUTPUT);
   pinMode(ADJUSTMENT_LED, OUTPUT);
   pinMode(SMS_NUMBER_PIN, INPUT_PULLUP);
@@ -96,6 +100,11 @@ void setup()
   flushGprsSerial();
   // Now turn it on.
   modemPowerOn();
+  
+  delay(100);
+  sendSms(0);
+  
+  laserPresentTimer = millis() + LASER_BLOCKED_TIMEOUT;
 
 #if defined(DISABLE_MODEM_WHILE_WAITING)
   // But we don't want the modem on line all the time
@@ -342,7 +351,7 @@ void turnOffEcho(void)
  * Send an sms to the predefined subscriber
  *
  **************************************************************************/
-int sendSms(void)
+int sendSms(byte msg)
 {
 #if !defined(DONT_SEND_REAL_SMS)
   uint32_t timeout;
@@ -370,7 +379,22 @@ int sendSms(void)
 #endif
   }
   delay(100);
-  gprsSerial.println(F(STR_MESSAGE)); //the content of the message
+  switch(msg) {
+    case 0:
+      gprsSerial.println(F(STR_WELCOME));
+      break;
+      
+    case 1:
+      gprsSerial.println(F(STR_MESSAGE));
+      break;
+      
+    case 2:
+      gprsSerial.println(F(STR_WARNING));
+      break;
+    
+    default:
+      hostSerial.println(F("Unknown string, this is a BUG !"));
+  }
   delay(100);
   gprsSerial.print((char)26);//the ASCII code of the ctrl+z is 26 (required according to the datasheet)
   delay(100);
@@ -423,6 +447,25 @@ error:
  **************************************************************************/
 void loop()
 {
+  // Check the state to see if we should reset the laser present counter
+  if (digitalRead(LASER_SENSOR_PIN) != oldLaserPin) {
+    hostSerial.println(F("Detected a state change on the laser pin"));
+    laserPresentTimer = millis() + LASER_BLOCKED_TIMEOUT;
+  } else {
+    // Send a warning to the user if we have been without the laser beam
+    // for to long.
+    if (digitalRead(LASER_SENSOR_PIN)) {
+      if (millis() >= laserPresentTimer) {
+        hostSerial.println(F("Detected that the laser has been gone for to long"));
+        sendSms(2);
+        laserPresentTimer = millis() + LASER_BLOCKED_TIMEOUT;
+        laserState = LASER_STATE_INACTIVE;
+      }
+    } else {
+      // While the laser signal is present we always set a new timeout.
+      laserPresentTimer = millis() + LASER_BLOCKED_TIMEOUT;
+    }
+  }
   switch (laserState) {
     case LASER_STATE_INACTIVE:
       if (digitalRead(LASER_SENSOR_PIN) && !oldLaserPin) {
@@ -442,7 +485,7 @@ void loop()
         } else {
           // This happens of the trigger wasn't long enough
           laserState = LASER_STATE_INACTIVE;
-          hostSerial.println(F("Short activation detected !"));
+          hostSerial.println(F("To short activation detected !"));
           // Disable the LED before going inactive again.
           digitalWrite(ADJUSTMENT_LED, HIGH);
         }
@@ -452,7 +495,7 @@ void loop()
     case LASER_STATE_DETECTED:
       digitalWrite(ADJUSTMENT_LED, HIGH);
       hostSerial.println(F("Dude, someone passed the line"));
-      if (sendSms()) {
+      if (sendSms(1)) {
         hostSerial.println(F("Failed to send SMS to client"));
       } else {
         hostSerial.println(F("SMS sent to client"));
@@ -460,7 +503,6 @@ void loop()
       // Set a timeout so we don't get a new detection right away.
       laserBlockTimer = millis() + LASER_DETECTION_GUARD;
       laserState = LASER_STATE_GUARD_START;
-
       break;
       
     case LASER_STATE_GUARD_START:
