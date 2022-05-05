@@ -28,6 +28,7 @@ char *STR_OK            = "OK";
                         "N\xe5gon \xe4r h\xe4r, Skynda skynda =)"
 #define   STR_WARNING   "Lasersignalen \xe4 borta, v\xe4nligen kontrollera systemet !"
 #define   STR_WELCOME   "Nu har passersystemet startat !"
+#define   STR_HEARTBEAT "Hej, jag lever =)"
 #define   SMS_STRING1   "AT+CMGS = \"+46768582241\""    /* Carina */
 #define   SMS_STRING2   "AT+CMGS = \"+46768582240\""    /* Pontus */
 
@@ -48,12 +49,15 @@ char *STR_OK            = "OK";
   #define LASER_ADJUST_LOCK_TIME 10000
 #endif
 #define SMS_RESPONSE_TIMEOUT     60000
+#define HEARTBEAT_TIMEOUT        1800000
+
 byte laserState = LASER_STATE_INACTIVE;
 byte oldLaserPin;
 boolean laserBlockTimerEnabled = false;
 uint32_t laserBlockTimer;
 uint32_t laserTrigTimer;
 uint32_t laserPresentTimer;
+uint32_t heartbeatTimer;
 
 /***************************************************************************
  *
@@ -105,6 +109,9 @@ void setup()
   sendSms(0);
   
   laserPresentTimer = millis() + LASER_BLOCKED_TIMEOUT;
+
+  // Setup heartbeat timer and callback
+  heartbeatTimer = millis();
 
 #if defined(DISABLE_MODEM_WHILE_WAITING)
   // But we don't want the modem on line all the time
@@ -391,6 +398,10 @@ int sendSms(byte msg)
     case 2:
       gprsSerial.println(F(STR_WARNING));
       break;
+
+    case 3:
+      gprsSerial.println(F(STR_HEARTBEAT));
+      break;
     
     default:
       hostSerial.println(F("Unknown string, this is a BUG !"));
@@ -447,6 +458,12 @@ error:
  **************************************************************************/
 void loop()
 {
+  if (millis() - heartbeatTimer > HEARTBEAT_TIMEOUT) {
+    heartbeatTimer = millis();
+    // Send a heartbeat to the user.
+    sendSms(3);
+  }
+  
   // Check the state to see if we should reset the laser present counter
   if (digitalRead(LASER_SENSOR_PIN) != oldLaserPin) {
     hostSerial.println(F("Detected a state change on the laser pin"));
@@ -547,4 +564,3 @@ void loop()
     gprsSerial.write(hostSerial.read());
   }
 }
-
